@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0b1020" />
+    <title>Vaseball</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚾</text></svg>"
+    />
+  </head>
+  <body>
+    <main class="app">
+      <header class="topbar">
+        <h1>Vaseball</h1>
+        <button id="quit" class="ghost" type="button" hidden>メニューに戻る</button>
+      </header>
+
+      <div class="stage">
+        <canvas id="game" aria-label="野球ゲーム画面"></canvas>
+
+        <section id="menu" class="overlay">
+          <div class="card">
+            <h2>オフライン対戦 (vs CPU)</h2>
+            <fieldset class="segmented">
+              <legend>先攻・後攻</legend>
+              <label><input type="radio" name="side" value="away" checked /><span>先攻</span></label>
+              <label><input type="radio" name="side" value="home" /><span>後攻</span></label>
+            </fieldset>
+            <div class="row">
+              <label>
+                イニング
+                <select id="innings">
+                  <option value="1">1回</option>
+                  <option value="3" selected>3回</option>
+                  <option value="6">6回</option>
+                  <option value="9">9回</option>
+                </select>
+              </label>
+              <label>
+                CPUの強さ
+                <select id="level">
+                  <option value="easy">よわい</option>
+                  <option value="normal" selected>ふつう</option>
+                  <option value="hard">つよい</option>
+                </select>
+              </label>
+            </div>
+            <button id="start" class="primary" type="button">プレイボール</button>
+            <details class="howto">
+              <summary>操作方法</summary>
+              <dl>
+                <dt>打つとき</dt>
+                <dd>黄色い円 (ミート位置) をマウス・矢印キー・WASD で動かし、ボールが手元に来た瞬間にクリック / Space でスイング。スマホはボールの来る位置をタップ。</dd>
+                <dt>投げるとき</dt>
+                <dd>1〜5 キー (または下のボタン) で球種を選び、狙うコースにカーソルを合わせてクリック / Space。狙いは多少ブレます。</dd>
+              </dl>
+            </details>
+          </div>
+        </section>
+
+        <section id="final" class="overlay" hidden>
+          <div class="card">
+            <h2 id="final-title"></h2>
+            <p id="final-score" class="final-score"></p>
+            <button id="again" class="primary" type="button">メニューへ</button>
+          </div>
+        </section>
+      </div>
+
+      <div id="pitch-panel" class="pitch-panel" hidden></div>
+      <ol id="log" class="log"></ol>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

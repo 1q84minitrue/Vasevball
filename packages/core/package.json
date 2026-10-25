@@ -1,0 +1,14 @@
+{
+  "name": "@vaseball/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Pure, deterministic baseball game logic shared by the client and (future) server.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  }
+}

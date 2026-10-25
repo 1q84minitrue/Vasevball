@@ -1,0 +1,266 @@
+:root {
+  --bg: #0b1020;
+  --surface: #151c33;
+  --surface-2: #1d2643;
+  --text: #eef1f8;
+  --muted: #9aa3bd;
+  --accent: #ffd640;
+  --away: #e0523f;
+  --home: #3f7be0;
+  --radius: 10px;
+  color-scheme: dark;
+  font-family: 'Hiragino Sans', 'Noto Sans JP', 'Yu Gothic UI', Meiryo, system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.app {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 12px 16px 32px;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: 0.04em;
+}
+
+.stage {
+  position: relative;
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
+}
+
+#game {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: crosshair;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(5, 8, 20, 0.6);
+  backdrop-filter: blur(2px);
+}
+
+.overlay[hidden] {
+  display: none;
+}
+
+.card {
+  width: min(420px, 100%);
+  max-height: 100%;
+  overflow: auto;
+  padding: 22px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: grid;
+  gap: 14px;
+}
+
+.card h2 {
+  margin: 0;
+  font-size: 20px;
+  text-align: center;
+}
+
+.segmented {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.segmented legend {
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.segmented label span {
+  display: block;
+  padding: 10px;
+  text-align: center;
+  border-radius: 8px;
+  background: var(--surface-2);
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.segmented input {
+  position: absolute;
+  opacity: 0;
+}
+
+.segmented input:checked + span {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.segmented input:focus-visible + span {
+  outline: 2px solid var(--accent);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.row label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+select {
+  padding: 9px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+.primary {
+  padding: 12px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #1a1400;
+  font-weight: 800;
+  font-size: 16px;
+}
+
+.primary:hover {
+  filter: brightness(1.08);
+}
+
+.ghost {
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: transparent;
+  color: var(--text);
+}
+
+.howto {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.howto summary {
+  cursor: pointer;
+}
+
+.howto dt {
+  margin-top: 8px;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.howto dd {
+  margin: 2px 0 0;
+  line-height: 1.6;
+}
+
+.final-score {
+  margin: 0;
+  text-align: center;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.pitch-panel {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.pitch-panel[hidden] {
+  display: none;
+}
+
+.pitch-panel button {
+  padding: 10px 4px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.pitch-panel button[aria-pressed='true'] {
+  border-color: #8cdcff;
+  color: #8cdcff;
+  background: var(--surface-2);
+}
+
+.log {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.log li {
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--surface);
+  border-left: 3px solid var(--muted);
+}
+
+.log li.away {
+  border-left-color: var(--away);
+}
+
+.log li.home {
+  border-left-color: var(--home);
+}
+
+@media (max-width: 520px) {
+  .pitch-panel {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .topbar h1 {
+    font-size: 18px;
+  }
+}

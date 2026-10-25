@@ -1,0 +1,21 @@
+{
+  "name": "vaseball",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @vaseball/client",
+    "build": "npm run build -w @vaseball/client",
+    "preview": "npm run preview -w @vaseball/client",
+    "test": "npm run test -w @vaseball/core",
+    "typecheck": "npm run typecheck --workspaces"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  }
+}
