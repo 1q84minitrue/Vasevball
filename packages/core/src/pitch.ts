@@ -27,8 +27,11 @@ export const PITCH_DISTANCE_M = 18.44;
 export const PITCH_TIME_SCALE = 1.8;
 /** Right-handed release point, projected into zone coordinates. */
 export const RELEASE_POINT: Vec2 = { x: -0.8, y: 3.0 };
-/** Pitchers cannot target further than this from the zone center. */
-export const TARGET_LIMIT = 2.2;
+/**
+ * How far pitchers can target. On the batter's side (-x) and upward the limit reaches the
+ * right-handed batter's body and head, so brushbacks (and beanballs) are possible.
+ */
+export const TARGET_BOUNDS = { minX: -3.6, maxX: 2.2, minY: -2.2, maxY: 3.6 } as const;
 /** Ball radius in zone units; a pitch touching the zone edge is a strike. */
 export const BALL_RADIUS = 0.17;
 
@@ -38,8 +41,8 @@ export function flightMsFor(speedKmh: number): number {
 
 export function createPitch(input: PitchInput, rng: Rng): Pitch {
   const spec = PITCH_SPECS[input.type];
-  const tx = clamp(input.target.x, -TARGET_LIMIT, TARGET_LIMIT);
-  const ty = clamp(input.target.y, -TARGET_LIMIT, TARGET_LIMIT);
+  const tx = clamp(input.target.x, TARGET_BOUNDS.minX, TARGET_BOUNDS.maxX);
+  const ty = clamp(input.target.y, TARGET_BOUNDS.minY, TARGET_BOUNDS.maxY);
   const speedKmh = Math.round(spec.speedKmh + rng.gaussian(0, 1.5));
   return {
     type: input.type,

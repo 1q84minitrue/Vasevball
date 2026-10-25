@@ -1,4 +1,4 @@
-import { botChoosePitch, botDecideSwing, TIMING_WINDOW_MS } from '@vaseball/core';
+import { BAT_SPECS, battingSide, botChoosePitch, botDecideSwing, BUNT_COMMIT_MS } from '@vaseball/core';
 import type { BotLevel, GameState, Pitch, PitchInput, Rng, SwingInput } from '@vaseball/core';
 import type { InputState } from './input';
 
@@ -18,6 +18,8 @@ export interface BatterController {
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+/** A swing can still connect this long after the ball arrives, with the most forgiving bat. */
+const LATEST_SWING_MS = Math.max(...Object.values(BAT_SPECS).map((b) => b.timingWindowMs));
 
 export class BotPitcher implements PitcherController {
   readonly kind = 'bot';
@@ -66,28 +68,37 @@ export class HumanPitcher implements PitcherController {
 
 export class HumanBatter implements BatterController {
   readonly kind = 'human';
-  private pending: { resolve: (s: SwingInput) => void; releaseAt: number; timer: number } | null = null;
+  private pending: { resolve: (s: SwingInput) => void; releaseAt: number; swingDelayMs: number; timers: number[] } | null = null;
 
   constructor(private readonly input: InputState) {}
 
-  decideSwing(_state: GameState, pitch: Pitch, releaseAt: number): Promise<SwingInput> {
+  decideSwing(state: GameState, pitch: Pitch, releaseAt: number): Promise<SwingInput> {
+    const swingDelayMs = BAT_SPECS[state.bats[battingSide(state)]].swingDelayMs;
     return new Promise((resolve) => {
-      const giveUpIn = releaseAt - performance.now() + pitch.flightMs + TIMING_WINDOW_MS + 30;
-      const timer = window.setTimeout(() => this.finish({ swing: false }), giveUpIn);
-      this.pending = { resolve, releaseAt, timer };
+      const arriveIn = releaseAt - performance.now() + pitch.flightMs;
+      // Still squared around (B held) just before the ball gets there: the bunt is on. Letting go pulls the bat back.
+      const bunt = window.setTimeout(() => {
+        if (this.input.buntHeld && this.pending) {
+          this.finish({ swing: true, bunt: true, timeMs: performance.now() - this.pending.releaseAt, aim: { ...this.input.aim } });
+        }
+      }, arriveIn - BUNT_COMMIT_MS);
+      const giveUp = window.setTimeout(() => this.finish({ swing: false }), arriveIn + LATEST_SWING_MS + 30);
+      this.pending = { resolve, releaseAt, swingDelayMs, timers: [bunt, giveUp] };
     });
   }
 
   swing(now: number): void {
     if (!this.pending) return;
-    this.finish({ swing: true, timeMs: now - this.pending.releaseAt, aim: { ...this.input.aim } });
+    // Heavy bats get to the contact point a while after the button is pressed.
+    const { releaseAt, swingDelayMs } = this.pending;
+    this.finish({ swing: true, timeMs: now - releaseAt + swingDelayMs, aim: { ...this.input.aim } });
   }
 
   private finish(swing: SwingInput): void {
     const pending = this.pending;
     if (!pending) return;
     this.pending = null;
-    clearTimeout(pending.timer);
+    pending.timers.forEach((t) => clearTimeout(t));
     pending.resolve(swing);
   }
 }

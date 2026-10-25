@@ -44,4 +44,6 @@ export type SwingInput =
       timeMs: number;
       /** Where the batter aimed the sweet spot (zone coordinates). */
       aim: Vec2;
+      /** The bat is held out over the plate instead of swung; `timeMs` is when the batter commits. */
+      bunt?: boolean;
     };

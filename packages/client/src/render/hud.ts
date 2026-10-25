@@ -1,4 +1,4 @@
-import { battingSide, currentBatter, inningLabel, PITCH_SPECS, TIMING_WINDOW_MS } from '@vaseball/core';
+import { BAT_SPECS, battingSide, currentBatter, inningLabel, PITCH_SPECS, requestableCall } from '@vaseball/core';
 import type { GameState, Side } from '@vaseball/core';
 import type { InputState } from '../game/input';
 import type { GameSession, Phase } from '../game/session';
@@ -69,13 +69,26 @@ function drawCount(ctx: Ctx, s: GameState): void {
   });
 }
 
+function drawRequests(ctx: Ctx, s: GameState, humanSide: Side): void {
+  const w = 176;
+  const x = VIEW_W - w - 10;
+  panel(ctx, x, 104, w, 24);
+  const cpu: Side = humanSide === 'away' ? 'home' : 'away';
+  drawText(ctx, `リクエスト残  あなた ${s.requestsLeft[humanSide]}  CPU ${s.requestsLeft[cpu]}`, x + w / 2, 120, {
+    size: 11,
+    align: 'center',
+    color: 'rgba(255,255,255,0.75)',
+  });
+}
+
 function drawBatterInfo(ctx: Ctx, s: GameState, humanSide: Side): void {
   const side = battingSide(s);
   const batter = currentBatter(s);
-  panel(ctx, 10, VIEW_H - 58, 190, 48);
+  panel(ctx, 10, VIEW_H - 58, 210, 48);
   ctx.fillStyle = TEAM_COLORS[side];
   ctx.fillRect(18, VIEW_H - 50, 4, 32);
-  drawText(ctx, side === humanSide ? 'あなたの攻撃' : 'CPUの攻撃', 30, VIEW_H - 38, { size: 11, color: 'rgba(255,255,255,0.65)' });
+  const who = side === humanSide ? 'あなたの攻撃' : 'CPUの攻撃';
+  drawText(ctx, `${who} · ${BAT_SPECS[s.bats[side]].label}`, 30, VIEW_H - 38, { size: 11, color: 'rgba(255,255,255,0.65)' });
   drawText(ctx, `${batter.order}番 ${batter.name}`, 30, VIEW_H - 18, { size: 16, weight: 800 });
 }
 
@@ -90,9 +103,9 @@ function drawPitchInfo(ctx: Ctx, phase: Phase, input: InputState, now: number): 
 }
 
 function hintFor(phase: Phase): string | null {
-  if (phase.kind === 'aiming' && phase.humanPitching) return '1〜5: 球種 ／ マウス・矢印: コース ／ クリック・Space: 投げる';
+  if (phase.kind === 'aiming' && phase.humanPitching) return '1〜6: 球種 ／ マウス・矢印: コース ／ クリック・Space: 投げる ／ T: タイム';
   if ((phase.kind === 'aiming' || phase.kind === 'pitch') && phase.humanBatting) {
-    return 'マウス・矢印: ミート位置 ／ クリック・Space: スイング';
+    return 'クリック・Space: スイング ／ B長押し: バント (離すと引く) ／ T: タイム';
   }
   return null;
 }
@@ -110,19 +123,28 @@ function centerLines(ctx: Ctx, lines: string[], y: number): void {
 }
 
 function timingFeedback(phase: Extract<Phase, { kind: 'result' }>): string | null {
-  if (!phase.humanBatting || !phase.swing.swing) return null;
+  if (!phase.humanBatting || !phase.swing.swing || phase.swing.bunt) return null;
   const dt = Math.round(phase.swing.timeMs - phase.pitch.flightMs);
   const word = Math.abs(dt) <= 25 ? 'ジャスト!' : dt < 0 ? '早い' : '遅い';
-  const tooFar = Math.abs(dt) > TIMING_WINDOW_MS ? 'すぎ' : '';
+  const tooFar = Math.abs(dt) > BAT_SPECS[phase.bat].timingWindowMs ? 'すぎ' : '';
   return `タイミング ${dt > 0 ? '+' : ''}${dt}ms (${word}${word === 'ジャスト!' ? '' : tooFar})`;
 }
 
 export function drawHud(ctx: Ctx, session: GameSession, input: InputState, now: number): void {
   const phase = session.phase;
-  const state = phase.kind === 'inPlay' ? phase.before : session.state;
+  const state = phase.kind === 'inPlay' || phase.kind === 'review' ? phase.before : session.state;
   drawScoreboard(ctx, state);
   drawCount(ctx, state);
-  if (phase.kind === 'inPlay') return;
+  drawRequests(ctx, state, session.humanSide);
+  if (phase.kind === 'review') return;
+  if (phase.kind === 'inPlay') {
+    const side = session.humanSide;
+    const call = requestableCall(phase.calls, side === battingSide(phase.before));
+    if (!phase.request && call && state.requestsLeft[side] > 0) {
+      drawText(ctx, 'R: リクエスト (判定に異議あり)', VIEW_W / 2, VIEW_H - 14, { size: 14, align: 'center', outline: 4, color: '#ffd640' });
+    }
+    return;
+  }
 
   drawBatterInfo(ctx, state, session.humanSide);
   drawPitchInfo(ctx, phase, input, now);
@@ -138,6 +160,9 @@ export function drawHud(ctx: Ctx, session: GameSession, input: InputState, now: 
     centerLines(ctx, [phase.text], 200);
   } else if (phase.kind === 'final') {
     centerLines(ctx, ['ゲームセット'], 200);
+  }
+  if (session.paused) {
+    centerLines(ctx, ['タイム'], 200);
   } else if (phase.kind === 'aiming' && !phase.humanPitching && phase.humanBatting) {
     drawText(ctx, 'ピッチャー構えて…', VIEW_W / 2, 150, { size: 16, align: 'center', outline: 4, color: 'rgba(255,255,255,0.75)' });
   }

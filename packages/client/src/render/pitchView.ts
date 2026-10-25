@@ -1,7 +1,8 @@
 import {
   BALL_RADIUS,
-  BAT_RADIUS,
+  BAT_SPECS,
   battingSide,
+  BUNT_REACH,
   BREAK_POWER,
   clamp,
   deg2rad,
@@ -11,7 +12,7 @@ import {
   pitchPositionAt,
   RELEASE_POINT,
 } from '@vaseball/core';
-import type { Pitch, PitchEvent, PitchType, SwingInput, Vec2 } from '@vaseball/core';
+import type { BatType, Pitch, PitchEvent, PitchType, SwingInput, Vec2 } from '@vaseball/core';
 import type { InputState } from '../game/input';
 import {
   ASCEND_MS,
@@ -311,7 +312,7 @@ function batDirection(yawDeg: number, tiltDeg: number): Point3 {
  * The barrel lags behind the hands, flattens out behind the batter, sweeps through the zone so the sweet
  * spot meets `aim` at contact, then wraps around over the front shoulder.
  */
-function batterPose(swingS: number | null, aim: Vec2 | null, shift: Vec2): BatterPose {
+function batterPose(swingS: number | null, aim: Vec2 | null, shift: Vec2, bunt = 0, buntAim: Vec2 = { x: 0, y: 0 }): BatterPose {
   const p = project(-3.2 + shift.x, GROUND_Y + shift.y, 0.3);
   const ground = project(-3.2 + shift.x, GROUND_Y, 0.3);
   const H = 6 * p.k;
@@ -335,8 +336,17 @@ function batterPose(swingS: number | null, aim: Vec2 | null, shift: Vec2): Batte
   const sweep = Math.sin((u * Math.PI) / 2); // fastest through the contact point
   const [endYaw, endTilt, endHands]: [number, number, Point3] = s <= 0 ? [READY_YAW, READY_TILT, readyHands] : [FINISH_YAW, FINISH_TILT, finishHands];
   const dir = batDirection(lerp(contactYaw, endYaw, sweep), lerp(contactTilt, endTilt, smooth((u - 0.3) / 0.7)));
-  const knob = lerp3(contactHands, endHands, smooth(u));
-  const tip = { x: knob.x + dir.x * BAT_LEN, y: knob.y + dir.y * BAT_LEN, z: knob.z + dir.z * BAT_LEN };
+  let knob = lerp3(contactHands, endHands, smooth(u));
+  let tip = { x: knob.x + dir.x * BAT_LEN, y: knob.y + dir.y * BAT_LEN, z: knob.z + dir.z * BAT_LEN };
+  if (bunt > 0) {
+    // Squared around: the bat is held level across the plate, the sweet spot over the bunting cursor.
+    const b = smooth(bunt);
+    const buntDir = batDirection(96, 8);
+    const buntKnob = { x: buntAim.x - buntDir.x * reach, y: buntAim.y - buntDir.y * reach, z: 0.6 - buntDir.z * reach };
+    const buntTip = { x: buntKnob.x + buntDir.x * BAT_LEN, y: buntKnob.y + buntDir.y * BAT_LEN, z: buntKnob.z + buntDir.z * BAT_LEN };
+    knob = lerp3(knob, buntKnob, b);
+    tip = lerp3(tip, buntTip, b);
+  }
   const hands = projectZone(knob);
   return { base: p, ground, H, hands: { x: hands.x, y: hands.y }, knob, tip };
 }
@@ -353,6 +363,17 @@ function followCursor(target: Vec2, now: number): Vec2 {
   const goal = { x: target.x, y: Math.max(0, target.y) };
   batterShift = { x: lerp(batterShift.x, goal.x, k), y: lerp(batterShift.y, goal.y, k) };
   return batterShift;
+}
+
+/** How far the batter has squared around to bunt (0..1), eased like the shift. */
+let buntBlend = 0;
+let buntBlendAt = 0;
+
+function followBunt(target: number, now: number): number {
+  const dt = clamp((now - buntBlendAt) / 1000, 0, 0.1);
+  buntBlendAt = now;
+  buntBlend = lerp(buntBlend, target, 1 - Math.exp(-dt / 0.06));
+  return buntBlend;
 }
 
 function drawBatterBody(ctx: Ctx, pose: BatterPose, color: string): void {
@@ -434,27 +455,123 @@ function drawAscending(ctx: Ctx, pose: BatterPose, q: number, draw: () => void, 
   ctx.restore();
 }
 
-function drawBat(ctx: Ctx, pose: BatterPose): void {
+const BAT_COLORS: Record<BatType, { fill: string; edge: string }> = {
+  normal: { fill: '#d8b07a', edge: 'rgba(60, 35, 10, 0.6)' },
+  torpedo: { fill: '#4a3426', edge: '#9a7048' },
+  fryingPan: { fill: '#1d1e23', edge: '#55595f' },
+  leftTurnSign: { fill: '#f4f5f7', edge: '#8e96a3' },
+};
+
+/** Bat half-width (zone units) along its length, from the knob (0) to the tip (1). */
+function batProfile(type: BatType, s: number): number {
+  switch (type) {
+    case 'torpedo':
+      // The torpedo bulges where the sweet spot is and narrows again toward the end.
+      if (s < 0.3) return 0.04;
+      if (s < 0.72) return lerp(0.04, 0.118, smooth((s - 0.3) / 0.42));
+      return lerp(0.118, 0.07, (s - 0.72) / 0.28);
+    case 'fryingPan':
+      return 0.045;
+    case 'leftTurnSign':
+      return 0.036;
+    default:
+      return lerp(0.04, 0.095, s);
+  }
+}
+
+function drawBat(ctx: Ctx, pose: BatterPose, type: BatType): void {
   const a = projectZone(pose.knob);
   const b = projectZone(pose.tip);
+  const along = (s: number) => ({ x: lerp(a.x, b.x, s), y: lerp(a.y, b.y, s), k: lerp(a.k, b.k, s) });
   const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
   const nx = -(b.y - a.y) / len;
   const ny = (b.x - a.x) / len;
-  const wa = 0.04 * a.k;
-  const wb = 0.095 * b.k;
+  const colors = BAT_COLORS[type];
+  // The pan's handle stops at the pan; everything else runs the whole length.
+  const shaftEnd = type === 'fryingPan' ? 0.7 : 1;
+
+  const n = 14;
+  const left: { x: number; y: number }[] = [];
+  const right: { x: number; y: number }[] = [];
+  for (let i = 0; i <= n; i++) {
+    const s = (i / n) * shaftEnd;
+    const p = along(s);
+    const w = batProfile(type, s) * p.k;
+    left.push({ x: p.x + nx * w, y: p.y + ny * w });
+    right.push({ x: p.x - nx * w, y: p.y - ny * w });
+  }
   ctx.beginPath();
-  ctx.moveTo(a.x + nx * wa, a.y + ny * wa);
-  ctx.lineTo(b.x + nx * wb, b.y + ny * wb);
-  ctx.lineTo(b.x - nx * wb, b.y - ny * wb);
-  ctx.lineTo(a.x - nx * wa, a.y - ny * wa);
+  [...left, ...right.reverse()].forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
   ctx.closePath();
-  ctx.fillStyle = '#d8b07a';
+  ctx.fillStyle = colors.fill;
   ctx.fill();
-  ctx.strokeStyle = 'rgba(60, 35, 10, 0.6)';
+  ctx.strokeStyle = colors.edge;
   ctx.lineWidth = 1;
   ctx.stroke();
-  // Rounded barrel end, which stays visible when the bat points toward the camera.
-  circle(ctx, b.x, b.y, wb, '#d8b07a');
+
+  const sweet = along(SWEET_SPOT);
+  if (type === 'fryingPan') {
+    drawPan(ctx, sweet.x, sweet.y, sweet.k);
+  } else if (type === 'leftTurnSign') {
+    // Pole cap, then the plate.
+    circle(ctx, b.x, b.y, 0.05 * b.k, '#c9ced6');
+    drawLeftTurnSign(ctx, sweet.x, sweet.y, sweet.k, Math.atan2(b.y - a.y, b.x - a.x));
+  } else {
+    // Rounded barrel end, which stays visible when the bat points toward the camera.
+    circle(ctx, b.x, b.y, batProfile(type, 1) * b.k, colors.fill);
+  }
+}
+
+function drawPan(ctx: Ctx, x: number, y: number, k: number): void {
+  const r = 0.55 * k;
+  circle(ctx, x, y, r, '#5d626b');
+  const g = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, r * 0.1, x, y, r * 0.86);
+  g.addColorStop(0, '#4a4e57');
+  g.addColorStop(1, '#202227');
+  ctx.beginPath();
+  ctx.arc(x, y, r * 0.86, 0, Math.PI * 2);
+  ctx.fillStyle = g;
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+  ctx.lineWidth = Math.max(1, r * 0.06);
+  ctx.beginPath();
+  ctx.arc(x, y, r * 0.6, -2.4, -1.4);
+  ctx.stroke();
+}
+
+/**
+ * The 左折可 plate as seen at Japanese intersections: a landscape white plate with a straight blue arrow
+ * pointing left (the 一方通行 sign with its colors swapped), clamped across the pole. "Up" on the plate
+ * runs along the pole toward its tip, so with the pole standing the arrow points left.
+ */
+function drawLeftTurnSign(ctx: Ctx, x: number, y: number, k: number, poleAngle: number): void {
+  const w = 1.3 * k;
+  const h = 0.48 * k;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(poleAngle + Math.PI / 2);
+  // Clamp bands where the plate is bolted to the pole, peeking out above and below it.
+  ctx.fillStyle = '#8e96a3';
+  for (const side of [-1, 1]) ctx.fillRect(-0.07 * k, side * (h / 2) - (side < 0 ? 0.06 * k : 0), 0.14 * k, 0.06 * k);
+  ctx.beginPath();
+  ctx.roundRect(-w / 2, -h / 2, w, h, Math.max(1, k * 0.04));
+  ctx.fillStyle = '#fbfbf8';
+  ctx.fill();
+  ctx.strokeStyle = '#b9bfc8';
+  ctx.lineWidth = Math.max(1, k * 0.025);
+  ctx.stroke();
+  ctx.fillStyle = '#1a4fb4';
+  ctx.beginPath();
+  ctx.moveTo(-w * 0.42, 0);
+  ctx.lineTo(-w * 0.13, -h * 0.34);
+  ctx.lineTo(-w * 0.13, -h * 0.12);
+  ctx.lineTo(w * 0.41, -h * 0.12);
+  ctx.lineTo(w * 0.41, h * 0.12);
+  ctx.lineTo(-w * 0.13, h * 0.12);
+  ctx.lineTo(-w * 0.13, h * 0.34);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
 }
 
 /**
@@ -542,9 +659,9 @@ function drawBallAt(ctx: Ctx, x: number, y: number, z: number): void {
   }
 }
 
-function drawBatCursor(ctx: Ctx, aim: Vec2): void {
+function drawBatCursor(ctx: Ctx, aim: Vec2, radius: number): void {
   const p = project(aim.x, aim.y, 0);
-  const r = BAT_RADIUS * ZW;
+  const r = radius * ZW;
   ctx.beginPath();
   ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
   ctx.fillStyle = 'rgba(255, 214, 64, 0.12)';
@@ -579,7 +696,7 @@ function drawPitchTarget(ctx: Ctx, aim: Vec2, type: PitchType): void {
 }
 
 function swingProgress(swing: SwingInput | null, releaseAt: number, now: number): number | null {
-  if (!swing || !swing.swing) return null;
+  if (!swing || !swing.swing || swing.bunt) return null;
   return (now - (releaseAt + swing.timeMs)) / SWING_HALF_MS;
 }
 
@@ -599,10 +716,12 @@ function drawFlyingBall(ctx: Ctx, phase: Extract<Phase, { kind: 'pitch' }>, t: n
   }
   let vx: number;
   let vy: number;
-  if (event.kind === 'inPlay') {
-    const b = event.play.batted;
-    vx = Math.sin((b.sprayDeg * Math.PI) / 180) * 700;
-    vy = -(150 + b.launchDeg * 9);
+  // Fouls fly off the same way as in the field view that follows: along the batted ball's spray angle.
+  const batted = event.kind === 'inPlay' ? event.play.batted : event.kind === 'foul' ? event.play?.batted : undefined;
+  if (batted) {
+    const speed = clamp(batted.exitVeloKmh / 140, 0.3, 1.2);
+    vx = Math.sin(deg2rad(batted.sprayDeg)) * 700 * speed;
+    vy = -(150 + batted.launchDeg * 9) * speed;
   } else if (hitBatter) {
     // Glances off the batter and drops.
     vx = 220;
@@ -625,24 +744,34 @@ export function drawPitchView(ctx: Ctx, session: GameSession | null, input: Inpu
   let windup = 0;
   let swingS: number | null = null;
   let swingAim: Vec2 | null = null;
+  let swing: SwingInput | null = null;
   if (phase.kind === 'pitch') {
     windup = (now - (phase.releaseAt - WINDUP_MS)) / WINDUP_MS;
-    swingS = swingProgress(phase.swing, phase.releaseAt, now);
-    if (phase.swing?.swing) swingAim = phase.swing.aim;
+    swing = phase.swing;
   } else if (phase.kind === 'result') {
     windup = 2;
-    swingS = swingProgress(phase.swing, phase.releaseAt, now);
-    if (phase.swing.swing) swingAim = phase.swing.aim;
+    swing = phase.swing;
   }
+  if (phase.kind === 'pitch' || phase.kind === 'result') {
+    swingS = swingProgress(swing, phase.releaseAt, now);
+    if (swing?.swing) swingAim = swing.aim;
+  }
+  const humanBat: BatType = session ? session.state.bats[session.humanSide] : 'normal';
+  const bat: BatType = phase.kind === 'pitch' || phase.kind === 'result' ? phase.bat : state ? state.bats[battingSide(state)] : 'normal';
+  const buntSwing = !!(swing?.swing && swing.bunt);
+  const humanSquared = (phase.kind === 'aiming' || phase.kind === 'pitch') && phase.humanBatting && input.buntHeld && !(swing?.swing && !swing.bunt);
+  const bunt = followBunt(buntSwing || humanSquared ? 1 : 0, now);
 
   drawPitcher(ctx, windup, pitcherColor, phase.kind === 'pitch' && windup < 1);
   // The batter follows the batting cursor (or, for the CPU, where it swings).
   const humanAim = (phase.kind === 'aiming' || phase.kind === 'pitch') && phase.humanBatting ? input.aim : null;
   const shiftTarget = swingAim ?? humanAim ?? (phase.kind === 'result' ? batterShift : { x: 0, y: 0 });
-  const pose = batterPose(swingS, swingAim, followCursor(shiftTarget, now));
+  const buntAim = swingAim ?? humanAim ?? { x: 0, y: 0 };
+  const pose = batterPose(bunt > 0.01 ? null : swingS, swingAim, followCursor(shiftTarget, now), bunt, buntAim);
   const ascent =
     phase.kind === 'result' && phase.strikeout ? clamp((now - phase.startAt - STRIKEOUT_ASCEND_DELAY_MS) / ASCEND_MS, 0, 1) : 0;
   if (ascent < 1) drawAscending(ctx, pose, ascent, () => drawBatterBody(ctx, pose, batterColor), true);
+  if (phase.kind === 'result' && phase.event.kind === 'hitByPitch' && phase.event.head) drawDizzy(ctx, pose, now - phase.startAt);
   drawZone(ctx);
 
   if (phase.kind === 'aiming' && phase.humanPitching) drawPitchTarget(ctx, input.aim, input.pitchType);
@@ -675,17 +804,60 @@ export function drawPitchView(ctx: Ctx, session: GameSession | null, input: Inpu
     ctx.stroke();
     if (phase.swing.swing) {
       const a = project(phase.swing.aim.x, phase.swing.aim.y, 0);
+      const radius = BAT_SPECS[phase.bat].radius * (phase.swing.bunt ? BUNT_REACH : 1);
       ctx.setLineDash([5, 4]);
       ctx.strokeStyle = 'rgba(255, 214, 64, 0.8)';
       ctx.beginPath();
-      ctx.arc(a.x, a.y, BAT_RADIUS * ZW, 0, Math.PI * 2);
+      ctx.arc(a.x, a.y, radius * ZW, 0, Math.PI * 2);
       ctx.stroke();
       ctx.setLineDash([]);
     }
   }
 
-  if (ascent < 1) drawAscending(ctx, pose, ascent, () => drawBat(ctx, pose));
+  if (ascent < 1) drawAscending(ctx, pose, ascent, () => drawBat(ctx, pose, bat));
 
   const humanBatting = (phase.kind === 'aiming' || phase.kind === 'pitch') && phase.humanBatting;
-  if (humanBatting) drawBatCursor(ctx, input.aim);
+  if (humanBatting) drawBatCursor(ctx, input.aim, BAT_SPECS[humanBat].radius * (input.buntHeld ? BUNT_REACH : 1));
+  if (phase.kind === 'pitch' && phase.humanBatting && swing?.swing && !swing.bunt) drawWindUp(ctx, phase, swing, now);
+}
+
+/** A heavy bat is still getting going after the button: an arc fills up around the aim until it swings. */
+function drawWindUp(ctx: Ctx, phase: Extract<Phase, { kind: 'pitch' }>, swing: Extract<SwingInput, { swing: true }>, now: number): void {
+  const delay = BAT_SPECS[phase.bat].swingDelayMs;
+  if (delay <= 0) return;
+  const swingStart = phase.releaseAt + swing.timeMs - SWING_HALF_MS;
+  const pressedAt = phase.releaseAt + swing.timeMs - delay;
+  if (now >= swingStart) return;
+  const q = clamp((now - pressedAt) / (swingStart - pressedAt), 0, 1);
+  const p = project(swing.aim.x, swing.aim.y, 0);
+  const r = BAT_SPECS[phase.bat].radius * ZW + 6;
+  ctx.strokeStyle = 'rgba(255, 140, 60, 0.95)';
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, r, -Math.PI / 2, -Math.PI / 2 + q * Math.PI * 2);
+  ctx.stroke();
+}
+
+/** Stars circling the batter's helmet after a pitch to the head. */
+function drawDizzy(ctx: Ctx, pose: BatterPose, ms: number): void {
+  const { base, H } = pose;
+  const cx = base.x + H * 0.03;
+  const cy = base.y - H * 1.0;
+  for (let i = 0; i < 3; i++) {
+    const a = ms / 260 + (i * Math.PI * 2) / 3;
+    drawStar(ctx, cx + Math.cos(a) * H * 0.14, cy + Math.sin(a) * H * 0.04, Math.max(3, H * 0.03), '#ffe14d');
+  }
+}
+
+function drawStar(ctx: Ctx, x: number, y: number, r: number, color: string): void {
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const a = -Math.PI / 2 + (i * Math.PI) / 5;
+    const rr = i % 2 === 0 ? r : r * 0.45;
+    if (i === 0) ctx.moveTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+    else ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+  }
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
 }

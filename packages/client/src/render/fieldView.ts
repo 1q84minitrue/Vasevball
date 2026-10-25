@@ -11,8 +11,17 @@ import {
   RUN_TO_FIRST,
   trackPositionAt,
 } from '@vaseball/core';
-import type { FieldingPlay, RunnerMove, Vec2 } from '@vaseball/core';
-import { ASCEND_SEC, PLAY_SPEED, resultShownSec, type Phase } from '../game/session';
+import type { BaseCall, Bases, FieldingPlay, FoulPlay, RunnerMove, Vec2 } from '@vaseball/core';
+import {
+  ASCEND_SEC,
+  PLAY_SPEED,
+  REPLAY_LEAD_SEC,
+  REPLAY_SPEED,
+  REPLAY_TAIL_SEC,
+  resultShownSec,
+  type InPlayPhase,
+  type ReviewPhase,
+} from '../game/session';
 import { circle, drawText, TEAM_COLORS, VIEW_H, VIEW_W, type Ctx } from './common';
 import { fielderPositions } from './fielderMotion';
 
@@ -197,14 +206,10 @@ function drawAscendingRunner(ctx: Ctx, pos: Vec2, color: string, q: number): voi
   ctx.restore();
 }
 
-export function drawFieldView(ctx: Ctx, phase: Extract<Phase, { kind: 'inPlay' }>, now: number): void {
-  const { play, before } = phase;
+/** Fielders, runners and the ball `t` game-seconds after contact. */
+function drawPlay(ctx: Ctx, play: FieldingPlay | FoulPlay, bases: Bases, defense: string, offense: string, t: number): void {
   const track = play.track;
-  const t = ((now - phase.startAt) / 1000) * PLAY_SPEED;
-  const defense = TEAM_COLORS[fieldingSide(before)];
-  const offense = TEAM_COLORS[battingSide(before)];
-
-  fielderPositions(play, before.bases, t).forEach((pos, i) => {
+  fielderPositions(play, bases, t).forEach((pos, i) => {
     const p = fp(pos);
     circle(ctx, p.x, p.y, 7.5, '#0d1222');
     circle(ctx, p.x, p.y, 6.5, defense);
@@ -224,6 +229,43 @@ export function drawFieldView(ctx: Ctx, phase: Extract<Phase, { kind: 'inPlay' }
   }
 
   drawBall(ctx, play, t);
+}
+
+/** The umpire's signal over the base, for a moment after each out/safe call. */
+function drawCalls(ctx: Ctx, calls: BaseCall[], t: number): void {
+  for (const c of calls) {
+    if (t < c.sec || t > c.sec + 1.4) continue;
+    const p = fp(BASES[c.base % 4]!);
+    drawText(ctx, c.calledOut ? 'アウト!' : 'セーフ!', p.x, p.y - 16, {
+      size: 15,
+      align: 'center',
+      weight: 800,
+      outline: 4,
+      color: c.calledOut ? '#ff7a6b' : '#62e391',
+    });
+  }
+}
+
+function banner(ctx: Ctx, text: string, y: number, color: string): void {
+  ctx.fillStyle = 'rgba(5, 8, 20, 0.7)';
+  ctx.fillRect(0, y - 22, VIEW_W, 32);
+  drawText(ctx, text, VIEW_W / 2, y, { size: 18, align: 'center', weight: 800, color });
+}
+
+export function drawFieldView(ctx: Ctx, phase: InPlayPhase | ReviewPhase, now: number): void {
+  const defense = TEAM_COLORS[fieldingSide(phase.before)];
+  const offense = TEAM_COLORS[battingSide(phase.before)];
+  if (phase.kind === 'review') return drawReplay(ctx, phase, now, defense, offense);
+
+  const { play, before } = phase;
+  const t = ((now - phase.startAt) / 1000) * PLAY_SPEED;
+  drawPlay(ctx, play, before.bases, defense, offense, t);
+  drawCalls(ctx, phase.calls, t);
+
+  if (phase.request) {
+    const who = phase.request.side === battingSide(before) ? '攻撃側' : '守備側';
+    banner(ctx, `${who}の監督がリクエスト!`, 118, '#ffd640');
+  }
 
   if (t >= resultShownSec(play)) {
     phase.messages.forEach((m, i) => {
@@ -236,6 +278,44 @@ export function drawFieldView(ctx: Ctx, phase: Extract<Phase, { kind: 'inPlay' }
       });
     });
   }
+}
+
+/** The review: the video of what really happened, slowed down around the call, then the ruling. */
+function drawReplay(ctx: Ctx, phase: ReviewPhase, now: number, defense: string, offense: string): void {
+  const { call } = phase.request;
+  const from = Math.max(0, call.sec - REPLAY_LEAD_SEC);
+  const to = call.sec + REPLAY_TAIL_SEC;
+  const t = phase.verdict ? to : Math.min(to, from + ((now - phase.startAt) / 1000) * REPLAY_SPEED);
+  drawPlay(ctx, phase.truth, phase.before.bases, defense, offense, t);
+
+  const base = fp(BASES[call.base % 4]!);
+  const pulse = 0.5 + 0.5 * Math.sin(now / 160);
+  ctx.strokeStyle = `rgba(255, 214, 64, ${0.5 + pulse * 0.5})`;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(base.x, base.y, 22 + pulse * 4, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Letterbox and a REPLAY tag, like the stadium screen.
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+  ctx.fillRect(0, VIEW_H - 26, VIEW_W, 26);
+  if (Math.floor(now / 500) % 2 === 0) circle(ctx, 24, VIEW_H - 13, 5, '#ff4040');
+  drawText(ctx, 'REPLAY  リプレー検証中', 36, VIEW_H - 8, { size: 13, weight: 800, color: '#fff' });
+
+  if (!phase.verdict) {
+    banner(ctx, '審判団が映像を確認しています…', 118, '#fff');
+    return;
+  }
+  ctx.fillStyle = 'rgba(5, 8, 20, 0.72)';
+  ctx.fillRect(0, 150, VIEW_W, 40 + phase.verdict.lines.length * 36);
+  phase.verdict.lines.forEach((line, i) => {
+    drawText(ctx, line, VIEW_W / 2, 182 + i * 36, {
+      size: i === 0 ? 20 : 26,
+      align: 'center',
+      weight: 800,
+      color: i === 0 ? 'rgba(255,255,255,0.8)' : phase.verdict!.overturned ? '#ffd640' : '#fff',
+    });
+  });
 }
 
 function drawBall(ctx: Ctx, play: Pick<FieldingPlay, 'track'>, t: number): void {

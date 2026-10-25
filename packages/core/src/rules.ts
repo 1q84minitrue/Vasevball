@@ -1,7 +1,14 @@
+import type { BatType } from './bats';
 import { resolveSwing, type SwingOutcome } from './batting';
 import { FIELDER_NAMES_JA, resolveBattedBall, resolveFoulBall, type FieldingPlay, type FoulPlay } from './fielding';
 import type { Rng } from './rng';
 import type { Pitch, Side, SwingInput } from './types';
+import { umpireCalls, type BaseCall } from './umpire';
+
+/** NPB: each manager may request two replay reviews through the 9th; an overturned call is not counted. */
+export const REQUESTS_PER_GAME = 2;
+/** Extra innings come with a fresh allowance, whatever was left over. */
+export const REQUESTS_EXTRA_INNINGS = 1;
 
 export interface GameConfig {
   innings: number;
@@ -34,13 +41,23 @@ export interface GameState {
   batterIndex: Record<Side, number>;
   status: 'playing' | 'final';
   winner: Side | 'tie' | null;
+  /** The bat each side's batters use. */
+  bats: Record<Side, BatType>;
+  /** Replay reviews each manager has left. */
+  requestsLeft: Record<Side, number>;
+  /** Both benches have been warned after a pitch to the head; the next one gets the pitcher ejected. */
+  warning: boolean;
 }
 
 export type PitchEvent =
   | Exclude<SwingOutcome, { kind: 'inPlay' | 'foul' }>
   /** `play` animates the foul ball; it is absent for fouls without a track (e.g. in tests). */
-  | { kind: 'foul'; play?: FoulPlay }
-  | { kind: 'inPlay'; play: FieldingPlay };
+  | { kind: 'foul'; play?: FoulPlay; bunt?: boolean }
+  /**
+   * `play` is the play as the umpires called it. `truth` (what really happened) and `calls` are there
+   * when the play had out/safe calls, so a replay review can put a wrong call right.
+   */
+  | { kind: 'inPlay'; play: FieldingPlay; truth?: FieldingPlay; calls?: BaseCall[] };
 
 export interface PitchReport {
   state: GameState;
@@ -66,6 +83,9 @@ export function createGame(teams: Record<Side, TeamInfo>, innings = 9): GameStat
     batterIndex: { away: 0, home: 0 },
     status: 'playing',
     winner: null,
+    bats: { away: 'normal', home: 'normal' },
+    requestsLeft: { away: REQUESTS_PER_GAME, home: REQUESTS_PER_GAME },
+    warning: false,
   };
 }
 
@@ -84,13 +104,23 @@ export function inningLabel(s: Pick<GameState, 'inning' | 'half'>): string {
 
 /** Server-side step: turns both players' inputs into a pitch event. */
 export function resolvePitchEvent(state: GameState, pitch: Pitch, swing: SwingInput, rng: Rng): PitchEvent {
-  const outcome = resolveSwing(pitch, swing, rng);
+  const outcome = resolveSwing(pitch, swing, rng, state.bats[battingSide(state)]);
   if (outcome.kind === 'foul') {
     const play = resolveFoulBall(outcome.ball, state.bases, state.outs);
-    return play.result === 'foul' ? { kind: 'foul', play } : { kind: 'inPlay', play };
+    return play.result === 'foul' ? { kind: 'foul', play, bunt: outcome.ball.bunt } : { kind: 'inPlay', play };
   }
   if (outcome.kind !== 'inPlay') return outcome;
-  return { kind: 'inPlay', play: resolveBattedBall(outcome.ball, state.bases, state.outs, rng) };
+  const truth = resolveBattedBall(outcome.ball, state.bases, state.outs, rng);
+  const { play, calls } = umpireCalls(truth, rng);
+  return calls.length > 0 ? { kind: 'inPlay', play, truth, calls } : { kind: 'inPlay', play };
+}
+
+/** Uses up one of the side's replay reviews, unless the call was overturned. */
+export function chargeRequest(prev: GameState, side: Side, overturned: boolean): GameState {
+  if (overturned) return prev;
+  const s = structuredClone(prev);
+  s.requestsLeft[side] = Math.max(0, s.requestsLeft[side] - 1);
+  return s;
 }
 
 export function applyPitchEvent(prev: GameState, ev: PitchEvent): PitchReport {
@@ -112,7 +142,13 @@ export function applyPitchEvent(prev: GameState, ev: PitchEvent): PitchReport {
       }
       break;
     case 'hitByPitch':
-      messages.push('デッドボール');
+      messages.push(ev.head ? 'デッドボール (頭部)' : 'デッドボール');
+      if (ev.head) {
+        // A fastball to the head, or any pitch to the head once the benches are warned, is 危険球退場.
+        if (ev.dangerous || s.warning) messages.push('危険球退場! ピッチャー交代');
+        else messages.push('警告試合が宣告されました');
+        s.warning = true;
+      }
       runs += walk(s);
       paEnded = true;
       break;
@@ -127,6 +163,14 @@ export function applyPitchEvent(prev: GameState, ev: PitchEvent): PitchReport {
       }
       break;
     case 'foul':
+      if (ev.bunt && s.strikes >= 2) {
+        // A two-strike bunt rolled foul is strike three.
+        messages.push('ファウル', 'スリーバント失敗');
+        s.strikes++;
+        s.outs++;
+        paEnded = true;
+        break;
+      }
       if (s.strikes < 2) s.strikes++;
       messages.push('ファウル');
       break;
@@ -228,10 +272,14 @@ function applyBallInPlay(s: GameState, play: FieldingPlay): { runs: number; text
     case 'forceOut':
       text = `${pos}ゴロ 二塁フォースアウト`;
       break;
+    case 'fieldersChoice':
+      text = `${pos}ゴロ フィルダースチョイス`;
+      break;
     case 'error':
       text = `${pos}のエラー!`;
       break;
   }
+  if (play.batted.bunt) text = buntText(play, pos, text, runs);
 
   const hit = play.result === 'single' || play.result === 'double' || play.result === 'triple' || play.result === 'homerun';
   // Runners the throw beat on a hit.
@@ -243,6 +291,28 @@ function applyBallInPlay(s: GameState, play: FieldingPlay): { runs: number; text
     s.hits[bat]++;
   }
   return { runs, text };
+}
+
+function buntText(play: FieldingPlay, pos: string, text: string, runs: number): string {
+  const advanced = play.runners.some((r) => r.from > 0 && !r.out && r.to > r.from);
+  switch (play.result) {
+    case 'groundout':
+      if (runs > 0) return `${pos}へのスクイズ成功!`;
+      return advanced ? `${pos}への送りバント成功` : `${pos}ゴロ (バント)`;
+    case 'single':
+      return `バントヒット! (${pos})`;
+    case 'forceOut':
+      return `バント失敗 ${pos}が二塁封殺`;
+    case 'doublePlay':
+      return `バント失敗 ダブルプレー!`;
+    case 'popout':
+    case 'flyout':
+    case 'lineout':
+    case 'foulout':
+      return `バント失敗 ${pos}フライ`;
+    default:
+      return text;
+  }
 }
 
 function endHalf(s: GameState): void {
@@ -258,6 +328,7 @@ function endHalf(s: GameState): void {
     if (s.inning >= s.config.innings && s.runs.home !== s.runs.away) return finish(s);
     if (s.inning >= s.config.maxInnings) return finish(s);
     s.inning++;
+    if (s.inning === s.config.innings + 1) s.requestsLeft = { away: REQUESTS_EXTRA_INNINGS, home: REQUESTS_EXTRA_INNINGS };
     s.half = 'top';
     s.lineScore.away.push(0);
   }

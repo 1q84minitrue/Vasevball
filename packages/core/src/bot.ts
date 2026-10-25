@@ -23,6 +23,10 @@ const LEVELS: Record<BotLevel, LevelParams> = {
 };
 
 const FASTBALL_FLIGHT_MS = flightMsFor(PITCH_SPECS.fastball.speedKmh);
+/** How often the bot lays down a sacrifice when the situation calls for it. */
+const SACRIFICE_CHANCE = 0.35;
+/** Bunts are committed to this long before the ball arrives. */
+export const BUNT_COMMIT_MS = 40;
 
 export function botChoosePitch(state: GameState, rng: Rng, level: BotLevel): PitchInput {
   const { balls, strikes } = state;
@@ -62,6 +66,18 @@ export function botDecideSwing(state: GameState, pitch: Pitch, rng: Rng, level: 
   const eye = p.eye * (1 + breakSize * 0.35);
   const perceived = { x: pitch.plate.x + rng.gaussian(0, eye), y: pitch.plate.y + rng.gaussian(0, eye) };
   const looksStrike = isStrike(perceived);
+
+  // Nobody out with a runner on first or second: move him over.
+  const sacrifice = state.outs === 0 && state.strikes < 2 && (state.bases[0] || state.bases[1]) && !state.bases[2];
+  if (sacrifice && looksStrike && rng.chance(SACRIFICE_CHANCE)) {
+    const sd = p.aimSd * 0.6;
+    return {
+      swing: true,
+      bunt: true,
+      timeMs: pitch.flightMs - BUNT_COMMIT_MS,
+      aim: { x: perceived.x + rng.gaussian(0, sd), y: perceived.y + rng.gaussian(0, sd) },
+    };
+  }
 
   let swingChance = looksStrike ? 0.68 : 0.22;
   if (state.strikes === 2) swingChance = looksStrike ? 0.92 : 0.35;

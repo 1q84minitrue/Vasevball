@@ -30,7 +30,7 @@ export class Renderer {
     const ctx = this.ctx;
     const phase = session?.phase;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    if (phase?.kind === 'inPlay') {
+    if (phase?.kind === 'inPlay' || phase?.kind === 'review') {
       this.fieldCache ??= this.prerender(drawFieldBackground);
       ctx.drawImage(this.fieldCache, 0, 0);
       ctx.setTransform(this.sx, 0, 0, this.sy, 0, 0);

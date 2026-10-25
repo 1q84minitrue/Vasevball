@@ -18,6 +18,7 @@ export type BipResult =
   | 'doublePlay'
   | 'forceOut'
   | 'foulout'
+  | 'fieldersChoice'
   | 'error';
 
 /** Home, first, second, third (field coordinates, meters). */
@@ -74,6 +75,10 @@ const ROLL_MAX = 25;
 export const RUN_TO_FIRST = 4.1;
 export const RUN_PER_BASE = 3.7;
 const LEAD_TO_SECOND = 3.3;
+/** On a bunt the runners break with the contact, so the force at second is harder to get. */
+const BUNT_LEAD_TO_SECOND = 2.75;
+/** The catcher has to come out from his crouch (and lose the mask) to field a bunt. */
+const CATCHER_BUNT_DELAY = 0.55;
 const SAFE_MARGIN = 0.3;
 const DEEP_HIT_DISTANCE = 85;
 /** A tagging runner leaves the base this long after the catch. */
@@ -385,6 +390,7 @@ function moveRunners(play: BallPlay, bases: Bases, outs: number): FieldingPlay {
       for (const b of occupied) run(b, b + 1);
       break;
     case 'forceOut':
+    case 'fieldersChoice':
     case 'doublePlay':
       run(0, 1, result === 'doublePlay' ? outAt(throwArrive(1)) : {});
       for (const b of occupied) run(b, b + 1, b === 1 ? outAt(throwArrive(0)) : {});
@@ -514,7 +520,7 @@ function resolveGroundBall(ball: BattedBall, bases: Bases, outs: number): BallPl
     const p = scale(dir, d);
     for (let i = 0; i < DEFAULT_FIELDERS.length; i++) {
       if (i === CATCHER && d > 8) continue;
-      const need = timeToReach(i, p, REACTION);
+      const need = timeToReach(i, p, REACTION) + (ball.bunt && i === CATCHER ? CATCHER_BUNT_DELAY : 0);
       if (need <= t) {
         fielder = i;
         fieldSec = t;
@@ -562,7 +568,7 @@ function resolveGroundBall(ball: BattedBall, bases: Bases, outs: number): BallPl
       (fielder === 3 || fielder === 5) && toSecond < 5
         ? { from: fieldAt, to: BASES[2]!, startSec: fieldSec, arriveSec: fieldSec + toSecond / FIELDER_SPEED + 0.1, carried: true }
         : throwBall(fieldAt, BASES[2]!, fieldSec + TRANSFER);
-    if (second.arriveSec < LEAD_TO_SECOND) {
+    if (second.arriveSec < (ball.bunt ? BUNT_LEAD_TO_SECOND : LEAD_TO_SECOND)) {
       const relay = throwBall(BASES[2]!, BASES[1]!, second.arriveSec + PIVOT);
       return relay.arriveSec < RUN_TO_FIRST ? play('doublePlay', [second, relay], 0) : play('forceOut', [second], 1);
     }

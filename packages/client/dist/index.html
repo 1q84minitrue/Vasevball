@@ -9,8 +9,8 @@
       rel="icon"
       href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚾</text></svg>"
     />
-    <script type="module" crossorigin src="./assets/index-DflFCfDV.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-CZbCiqbc.css">
+    <script type="module" crossorigin src="./assets/index-DhvuNLhz.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-DINHk9Uw.css">
   </head>
   <body>
     <main class="app">
@@ -55,10 +55,27 @@
               <dl>
                 <dt>打つとき</dt>
                 <dd>黄色い円 (ミート位置) をマウス・矢印キー・WASD で動かし、ボールが手元に来た瞬間にクリック / Space でスイング。スマホはボールの来る位置をタップ。</dd>
+                <dt>バント</dt>
+                <dd>B キー (または下のボタン) を押している間バントの構え。ボールが来るまで押し続けるとバント、途中で離すとバットを引きます。2ストライクからのファウルはスリーバント失敗で三振。</dd>
                 <dt>投げるとき</dt>
-                <dd>1〜5 キー (または下のボタン) で球種を選び、狙うコースにカーソルを合わせてクリック / Space。狙いは多少ブレます。</dd>
+                <dd>1〜6 キー (または下のボタン) で球種を選び、狙うコースにカーソルを合わせてクリック / Space。狙いは多少ブレます。打者の体や頭も狙えますが、頭部への死球は警告・危険球退場の対象です。</dd>
+                <dt>タイム</dt>
+                <dd>T キー (投球の合間のみ)。バットを持ち替えられます。</dd>
+                <dt>リクエスト</dt>
+                <dd>塁上のアウト・セーフの判定に不服なら、プレーの映像が流れている間に R キー。NPB と同じく 9 回までに 2 回 (判定が覆れば回数は減らない)、延長戦は新たに 1 回。ストライク・ボールは対象外。塁審はたまに誤審します。</dd>
+                <dt>音</dt>
+                <dd>M キーでミュート切り替え。</dd>
               </dl>
             </details>
+          </div>
+        </section>
+
+        <section id="time" class="overlay" hidden>
+          <div class="card">
+            <h2>タイム</h2>
+            <p class="time-note" id="time-note"></p>
+            <div id="bat-list" class="bat-list" role="radiogroup" aria-label="バットの選択"></div>
+            <button id="resume" class="primary" type="button">プレー再開</button>
           </div>
         </section>
 
@@ -71,6 +88,13 @@
         </section>
       </div>
 
+      <div id="controls" class="controls" hidden>
+        <button id="bunt-btn" type="button">バント <kbd>B</kbd></button>
+        <button id="time-btn" type="button">タイム <kbd>T</kbd></button>
+        <button id="request-btn" type="button">リクエスト <kbd>R</kbd></button>
+        <button id="mute-btn" type="button">音 ON <kbd>M</kbd></button>
+      </div>
+      <p id="toast" class="toast" role="status" hidden></p>
       <div id="pitch-panel" class="pitch-panel" hidden></div>
       <ol id="log" class="log"></ol>
     </main>
